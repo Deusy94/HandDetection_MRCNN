@@ -73,7 +73,7 @@ def apply_mask(image, mask, color, alpha=0.5):
     return image
 
 
-def display_instances(image, boxes, masks, class_ids, class_names,
+def display_instances(name, image, boxes, masks, class_ids, class_names,
                       scores=None, title="",
                       figsize=(16, 16), ax=None):
     """
@@ -95,7 +95,7 @@ def display_instances(image, boxes, masks, class_ids, class_names,
         _, ax = plt.subplots(1, figsize=figsize)
 
     # Generate random colors
-    colors = random_colors(N)
+    color = (0, 0, 1.0)
 
     # Show area outside image boundaries.
     height, width = image.shape[:2]
@@ -106,7 +106,6 @@ def display_instances(image, boxes, masks, class_ids, class_names,
 
     masked_image = image.astype(np.uint32).copy()
     for i in range(N):
-        color = colors[i]
 
         # Bounding box
         if not np.any(boxes[i]):
@@ -121,7 +120,8 @@ def display_instances(image, boxes, masks, class_ids, class_names,
         # Label
         class_id = class_ids[i]
         score = scores[i] if scores is not None else None
-        label = class_names[class_id]
+        # label = class_names[class_id]
+        label = "Hand"
         x = random.randint(x1, (x1 + x2) // 2)
         caption = "{} {:.3f}".format(label, score) if score else label
         ax.text(x1, y1 + 8, caption,
@@ -143,8 +143,10 @@ def display_instances(image, boxes, masks, class_ids, class_names,
             p = Polygon(verts, facecolor="none", edgecolor=color)
             ax.add_patch(p)
     ax.imshow(masked_image.astype(np.uint8))
-    plt.show()
-    
+    # plt.show()
+    plt.savefig(name)
+    plt.close('all')
+
 
 def draw_rois(image, rois, refined_rois, mask, class_ids, class_names, limit=10):
     """

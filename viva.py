@@ -1,40 +1,29 @@
 """
 Mask R-CNN
-Configurations and data loading code for MS COCO.
-
-Copyright (c) 2017 Matterport, Inc.
-Licensed under the MIT License (see LICENSE for details)
-Written by Waleed Abdulla
+Configurations and data loading code for VIVA Hand Dataset.
 
 ------------------------------------------------------------
 
-Usage: import the module (see Jupyter notebooks for examples), or run from
-       the command line as such:
+Usage:
 
     # Train a new model starting from pre-trained COCO weights
-    python3 coco.py train --dataset=/path/to/coco/ --model=coco
+    python3 viva.py train --dataset=/path/to/viva/ --model=coco_weights
 
     # Train a new model starting from ImageNet weights
-    python3 coco.py train --dataset=/path/to/coco/ --model=imagenet
+    python3 viva.py train --dataset=/path/to/viva/ --model=imagenet
 
     # Continue training a model that you had trained earlier
-    python3 coco.py train --dataset=/path/to/coco/ --model=/path/to/weights.h5
+    python3 viva.py train --dataset=/path/to/viva/ --model=/path/to/weights.h5
 
-    # Continue training the last model you trained
-    python3 coco.py train --dataset=/path/to/coco/ --model=last
+    # Perform inference over dataset
+    python3 viva.py test --dataset=/path/to/dataset/ --model=/path/to/weights.ht
 
-    # Run COCO evaluatoin on the last model you trained
-    python3 coco.py evaluate --dataset=/path/to/coco/ --model=last
 """
 
 import os
 import sys
 import cv2 as cv2
-import time
 import numpy as np
-import zipfile
-import urllib.request
-import shutil
 from random import shuffle
 import matplotlib.pyplot as plt
 
@@ -54,7 +43,6 @@ ROOT_DIR = os.getcwd()
 # Directory to save logs and model checkpoints, if not provided
 # through the command line argument --logs
 DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
-DEFAULT_DATASET_YEAR = "2017"
 
 ############################################################
 #  Configurations
@@ -128,11 +116,33 @@ def load_annotations(image_path, ann_dir):
 def submission(name, result):
     out_file = 'MaskRCNN.txt'
     for i in range(len(result['rois'])):
-        BBgt = "{} {} {} {} {} {} -1 -1 -1\n".format(name, result['rois'][i][0], result['rois'][i][1],
-                                                   result['rois'][i][2], result['rois'][i][3],
-                                                   result['scores'][i])
+        bbGt = "{} {} {} {} {} {} -1 -1 -1\n".format(name, result['rois'][i][1], result['rois'][i][0],
+                                                     result['rois'][i][3] - result['rois'][i][1],
+                                                     result['rois'][i][2] - result['rois'][i][0],
+                                                     result['scores'][i])
         with open(out_file, "a") as myfile:
-            myfile.write(BBgt)
+            myfile.write(bbGt)
+
+
+def printProgressBar (iteration, total, prefix='', suffix='', decimals=1, length=100, fill='█'):
+    """
+    Call in a loop to create terminal progress bar
+    @params:
+        iteration   - Required  : current iteration (Int)
+        total       - Required  : total iterations (Int)
+        prefix      - Optional  : prefix string (Str)
+        suffix      - Optional  : suffix string (Str)
+        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        length      - Optional  : character length of bar (Int)
+        fill        - Optional  : bar fill character (Str)
+    """
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = '\r')
+    # Print New Line on Complete
+    if iteration == total:
+        print()
 
 
 class VivaDataset(utils.Dataset):
@@ -283,31 +293,6 @@ if __name__ == '__main__':
 
         model.keras_model.save_weights(f"./final_{args.wname}.h5")
 
-    elif args.command == "resume":
-        dataset_train = VivaDataset()
-        dataset_train.load_viva(image_dir, args.command)
-        dataset_train.prepare()
-
-        dataset_val = VivaDataset()
-        dataset_val.load_viva(image_dir, "val", 500)
-        dataset_val.prepare()
-
-        config = VivaConfig()
-        config.display()
-
-        # Create model in training mode
-        model = modellib.MaskRCNN(mode="training", config=config, model_dir=MODEL_DIR)
-        model.load_weights(MODEL_PATH, by_name=True,
-                           exclude=["mrcnn_class_logits", "mrcnn_bbox_fc", "mrcnn_bbox", "mrcnn_mask"])
-
-        print("Fine tune all layers")
-        model.train(dataset_train, dataset_val,
-                    learning_rate=config.LEARNING_RATE / 10,
-                    epochs=160,
-                    layers='all')
-
-        model.keras_model.save_weights(f"./final_{args.wname}.h5")
-
     elif args.command == "test":
         class InferenceConfig(VivaConfig):
             GPU_COUNT = 1
@@ -334,6 +319,7 @@ if __name__ == '__main__':
         model.load_weights(model_path, by_name=True)
 
         num = int(args.num) if int(args.num) > 0 else len(img_names)
+        printProgressBar(0, num, prefix='Progress:', suffix='Complete', length=50)
         for i in range(num):
             original_image = cv2.imread(
                 "{}/{}".format(
@@ -347,7 +333,6 @@ if __name__ == '__main__':
             '''
             visualize.display_instances(f"./Predicted/{img_names[i]}", original_image, r['rois'], r['masks'], r['class_ids'],
                                         class_names, r['scores'], ax=get_ax())
-            '''
             if i == int((num-1) * 0.25):
                 print("Fatto il 25%.")
             elif i == int((num-1) * 0.5):
@@ -356,6 +341,8 @@ if __name__ == '__main__':
                 print("Fatto il 75%.")
             elif i == int(num-1):
                 print("Fatto il 100%.")
+            '''
+            printProgressBar(i+1, num, prefix='Progress:', suffix='Complete', length=50)
 
     else:
         print("'{}' is not recognized. "

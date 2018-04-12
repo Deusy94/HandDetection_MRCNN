@@ -343,6 +343,7 @@ if __name__ == '__main__':
                 print("Fatto il 100%.")
             '''
             printProgressBar(i+1, num, prefix='Progress:', suffix='Complete', length=50)
+            print("Fulgeri culo")
 
     else:
         print("'{}' is not recognized. "

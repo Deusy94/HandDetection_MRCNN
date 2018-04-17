@@ -66,22 +66,11 @@ class VivaConfig(Config):
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 4  # VIVA has 4 classes
-
     IMAGE_MIN_DIM = 320
     IMAGE_MAX_DIM = 320
-
-    # Use smaller anchors because our image and objects are small
-    # RPN_ANCHOR_SCALES = (32, 64, 128, 256, 512)  # anchor side in pixels
-
-    # Reduce training ROIs per image because the images are small and have
-    # few objects. Aim to allow ROI sampling to pick 33% positive ROIs.
-    # TRAIN_ROIS_PER_IMAGE = 32
-
-    # Use a small epoch since the data is simple
     STEPS_PER_EPOCH = 200
-
-    # use small validation steps since the epoch is small
     VALIDATION_STEPS = 5
+
 
 ############################################################
 #  Dataset
@@ -96,6 +85,7 @@ def get_ax(rows=1, cols=1, size=8):
     Change the default size attribute to control the size
     of rendered images
     """
+    plt.switch_backend('agg')
     _, ax = plt.subplots(rows, cols, figsize=(size * cols, size * rows))
     return ax
 
@@ -115,18 +105,26 @@ def load_annotations(image_path, ann_dir):
 
 def submission(name, result):
     out_file = 'MaskRCNN.txt'
+    class_names = ['BG', 'leftHand_driver', 'rightHand_driver', 'leftHand_passenger', 'rightHand_passenger']
     for i in range(len(result['rois'])):
-        bbGt = "{} {} {} {} {} {} -1 -1 -1\n".format(name, result['rois'][i][1], result['rois'][i][0],
+        if class_names[result['class_ids'][i]] == class_names[1]:
+            class_id = (0, 0)
+        elif class_names[result['class_ids'][i]] == class_names[2]:
+            class_id = (1, 0)
+        elif class_names[result['class_ids'][i]] == class_names[3]:
+            class_id = (0, 1)
+        elif class_names[result['class_ids'][i]] == class_names[4]:
+            class_id = (1, 1)
+        bbGt = "{} {} {} {} {} {} {} {} -1\n".format(name, result['rois'][i][1], result['rois'][i][0],
                                                      result['rois'][i][3] - result['rois'][i][1],
                                                      result['rois'][i][2] - result['rois'][i][0],
-                                                     result['scores'][i])
+                                                     result['scores'][i], class_id[0], class_id[1])
         with open(out_file, "a") as myfile:
             myfile.write(bbGt)
 
 
 def printProgressBar (iteration, total, prefix='', suffix='', decimals=1, length=100, fill='█'):
     """
-    Call in a loop to create terminal progress bar
     @params:
         iteration   - Required  : current iteration (Int)
         total       - Required  : total iterations (Int)
@@ -147,10 +145,9 @@ def printProgressBar (iteration, total, prefix='', suffix='', decimals=1, length
 
 class VivaDataset(utils.Dataset):
     def load_viva(self, dataset_dir, subset, num=0):
-        """Load a subset of the VIVA dataset.
+        """Load VIVA dataset.
         dataset_dir: The root directory of the VIVA dataset.
-        year: What dataset year to load (2014, 2017) as a string, not an integer
-        class_ids: If provided, only loads images that have the given classes.
+        subset: Test or valuation
         """
 
         ann_dir = "{}/detectiondata/train/posGt".format(dataset_dir)
@@ -181,11 +178,16 @@ class VivaDataset(utils.Dataset):
                 annotations=load_annotations(img_names[i], ann_dir))
 
     def load_mask(self, image_id):
-        # Have to load a mask from Bounding Box
+        """Have to load a mask from Bounding Box
+        Since VIVA don't provide masks in annotation, and
+        MaskRCNN train over masks, we decided to fill the BoundingBox
+        and pass that as a mask.
+        """
         info = self.image_info[image_id]
         hands = info['annotations']
         count = len(hands)
         mask = np.zeros([info['height'], info['width'], count], dtype=np.uint8)
+        """Filling the bounding box"""
         for i, val in enumerate(hands):
             mask[:, :, i:i + 1] = cv2.rectangle(mask[:, :, i:i + 1].copy(),
                                                 (val['x'], val['y']),
@@ -205,8 +207,19 @@ class VivaDataset(utils.Dataset):
 
 
 if __name__ == '__main__':
-    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
+    """Usage for viva.py
+    @params:
+        command     - Required : train or test 
+        dataset     - Required : /path/to/viva
+        model       - Required : /path/to/weights.h5
+        logs        - Optional : logs directory path
+        wname       - Optional : name of weights file
+        num         - number of image to process
+    """
+    # Comment this to use every GPU available
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
     import argparse
     # Parse command line arguments
     parser = argparse.ArgumentParser(
@@ -232,6 +245,10 @@ if __name__ == '__main__':
                         default=0,
                         metavar="number_of_test_images",
                         help="Insert the number of image to test, if no number it takes all.")
+    parser.add_argument('--type', required=False,
+                        default='submit',
+                        metavar="txt_out_or_images",
+                        help="Choose if have txt as output or Images with annotations on.")
 
     args = parser.parse_args()
     print("Command: ", args.command)
@@ -240,6 +257,7 @@ if __name__ == '__main__':
     print("Logs: ", args.logs)
     if args.command == "train":
         print("Weight-name: ", args.wname)
+    print("Type: ", args.type)
 
     image_dir = args.dataset
     # Directory to save logs and trained model
@@ -247,12 +265,14 @@ if __name__ == '__main__':
     # Local path to trained weights file
     MODEL_PATH = os.path.join(ROOT_DIR, args.model)
 
+    """Train the model"""
     if args.command == "train":
         dataset_train = VivaDataset()
         dataset_train.load_viva(image_dir, args.command)
         dataset_train.prepare()
 
         dataset_val = VivaDataset()
+        """Change the number for get more/less image to valuate"""
         dataset_val.load_viva(image_dir, "val", 500)
         dataset_val.prepare()
 
@@ -261,6 +281,7 @@ if __name__ == '__main__':
 
         # Create model in training mode
         model = modellib.MaskRCNN(mode="training", config=config, model_dir=MODEL_DIR)
+        """I usually train the network starting from pre-trained MS-COCO weights"""
         model.load_weights(MODEL_PATH, by_name=True,
                            exclude=["mrcnn_class_logits", "mrcnn_bbox_fc", "mrcnn_bbox", "mrcnn_mask"])
 
@@ -271,8 +292,6 @@ if __name__ == '__main__':
                     epochs=40,
                     layers='heads')
 
-        model.keras_model.save_weights(f"./first{args.wname}.h5")
-
         # Training - Stage 2
         # Finetune layers from ResNet stage 4 and up
         print("Fine tune Resnet stage 4 and up")
@@ -281,8 +300,6 @@ if __name__ == '__main__':
                     epochs=120,
                     layers='4+')
 
-        model.keras_model.save_weights(f"./second_{args.wname}.h5")
-
         # Training - Stage 3
         # Fine tune all layers
         print("Fine tune all layers")
@@ -290,10 +307,11 @@ if __name__ == '__main__':
                     learning_rate=config.LEARNING_RATE / 10,
                     epochs=160,
                     layers='all')
-
-        model.keras_model.save_weights(f"./final_{args.wname}.h5")
+        """At the end save weights"""
+        model.keras_model.save_weights(f"./{args.wname}.h5")
 
     elif args.command == "test":
+
         class InferenceConfig(VivaConfig):
             GPU_COUNT = 1
             IMAGES_PER_GPU = 1
@@ -311,11 +329,10 @@ if __name__ == '__main__':
         img_names.sort()
 
         # Get path to saved weights
-        # Either set a specific path or find last trained weights
         # model_path = os.path.join(ROOT_DIR, ".h5 file name here")
         model_path = args.model
 
-        print("Loading weights from ", model_path)
+        print(f"Loading weights from {model_path}...")
         model.load_weights(model_path, by_name=True)
 
         num = int(args.num) if int(args.num) > 0 else len(img_names)
@@ -329,19 +346,12 @@ if __name__ == '__main__':
             original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
             results = model.detect([original_image], verbose=0)
             r = results[0]
-            submission(img_names[i], r)
-            '''
-            visualize.display_instances(f"./Predicted/{img_names[i]}", original_image, r['rois'], r['masks'], r['class_ids'],
-                                        class_names, r['scores'], ax=get_ax())
-            if i == int((num-1) * 0.25):
-                print("Fatto il 25%.")
-            elif i == int((num-1) * 0.5):
-                print("Fatto il 50%.")
-            elif i == int((num-1) * 0.75):
-                print("Fatto il 75%.")
-            elif i == int(num-1):
-                print("Fatto il 100%.")
-            '''
+            if args.type == "submit":
+                """This save the submission in the VIVA format in .txt file"""
+                submission(img_names[i], r)
+            elif args.type == "images":
+                visualize.display_instances(f"./Predicted/{img_names[i]}", original_image, r['rois'],
+                                            r['masks'], r['class_ids'], class_names, r['scores'], ax=get_ax())
             printProgressBar(i+1, num, prefix='Progress:', suffix='Complete', length=50)
 
     else:
